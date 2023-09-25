@@ -1,5 +1,5 @@
 # CosMxDA Export Custom Module
-message("Custom Script Version: 1.2.1")
+message("Custom Script Version: 1.2.2")
 
 # Copyright 2023 NanoString Technologies, Inc.
 # This software and any associated files are distributed pursuant to the NanoString AtoMx Spatial 
@@ -52,13 +52,19 @@ variableTest <- function(varName, varType, msg, required = TRUE){
   if(exists(varName)){
     if(varType == "logical"){
       if(is.null(get(varName))){
-        assign(varName, FALSE)
+        assign(varName, FALSE, envir = .GlobalEnv)
       }
     }
     
     if(!is(get(varName), varType)){
-      varMsg <- paste0(varMsg, paste0("\n\"", varName, "\" varType was not set as ", typeClass, 
-                                      " in custom module creation"))
+      if(!is.null(get(varName)) | required == TRUE){
+        varMsg <- paste0(varMsg, paste0("\n\"", varName, "\" varType was not set as ", typeClass, 
+                                        " in custom module creation"))
+      }
+    }
+    
+    if(get(varName) == "" & required == TRUE){
+      varMsg <- paste0(varMsg, paste0("\n\"", varName, "\" was not set and is required"))
     }
   }
   
