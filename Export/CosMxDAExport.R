@@ -63,8 +63,14 @@ variableTest <- function(varName, varType, msg, required = TRUE){
       }
     }
     
-    if(get(varName) == "" & required == TRUE){
-      varMsg <- paste0(varMsg, paste0("\n\"", varName, "\" was not set and is required"))
+    if(required == TRUE){
+      if(is.null(get(varName))){
+        varMsg <- paste0(varMsg, paste0("\n\"", varName, "\" was not set and is required"))
+      }else{
+        if(get(varName) == ""){
+          varMsg <- paste0(varMsg, paste0("\n\"", varName, "\" was not set and is required")) 
+        }
+      }
     }
   }
   
@@ -425,6 +431,10 @@ if(SeuratObject == TRUE){
     sem <- suppressWarnings(toFullSeuratObject(tiledbsc_dataset = study,transcripts = transcripts))
   }else{
     sem <- suppressWarnings(study$to_seurat(batch_mode = TRUE))
+    
+    for(i in names(sem@reductions)){
+      sem@reductions[[i]]@assay.used <- "RNA"
+    }
     
     if(transcripts == TRUE){
       sem@misc$transcriptCoords <- NULL
