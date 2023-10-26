@@ -1,0 +1,5 @@
+v1.0.1
+Bug fix on flowcells with whitespace
+
+v1.0.0
+Initial Release
