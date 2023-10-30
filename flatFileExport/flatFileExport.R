@@ -1,6 +1,12 @@
 # Name: Flat File Export Custom Module
 message("Custom Script Version: 1.0.1")
 
+# Copyright 2023 NanoString Technologies, Inc.
+# This software and any associated files are distributed pursuant to the NanoString AtoMx Spatial 
+# Information Platform Software as a Service Agreement, available on the NanoString Technologies, Inc 
+# website at www.nanostring.com, as updated.  All rights reserved.  No permission is granted to modify, 
+# publish, distribute, sublicense or sell copies of this software.
+
 # Description: Export Flat files used in Seurat's LoadNanostring function
 
 # To get around v1.1 2-hour limit, suggested pipeline contains 3 flat file 
