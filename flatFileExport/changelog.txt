@@ -1,5 +1,11 @@
+v1.1.0
+- Bug fix for FOVs with 1 cell
+- Seurat v4.4 & v5 compatibility
+- Speed up transcript file writing
+- China python package installation
+
 v1.0.1
-Bug fix on flowcells with whitespace
+- Bug fix on flowcells with whitespace
 
 v1.0.0
-Initial Release
+- Initial Release

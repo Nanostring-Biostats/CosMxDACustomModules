@@ -1,5 +1,5 @@
 # Name: Flat File Export Custom Module
-message("Custom Script Version: 1.0.1")
+message("Custom Script Version: 1.1.1")
 
 # Copyright 2023 NanoString Technologies, Inc.
 # This software and any associated files are distributed pursuant to the NanoString AtoMx Spatial 
@@ -348,7 +348,7 @@ if(countMatrix == TRUE){
     
     slideName <- gsub("\\W", "", slideName)
     
-    countsFOV <- cbind(obs[cells,c("fov","cell_ID","cell")], counts[cells,])
+    countsFOV <- cbind(obs[cells,c("fov","cell_ID")], counts[cells,,drop=FALSE])
     
     data.table::fwrite(file = paste0("output/",slideName, "/", slideName, "_exprMat_file", fileType), 
                        x = countsFOV, quote = FALSE, 
@@ -396,60 +396,89 @@ if(transcripts == TRUE){
     message("Generating Cell Transcripts file")
     
     coords <- c("x_FOV_px", "y_FOV_px","x_slide_mm", "y_slide_mm")
+  
+    slideFOVsAll <- unique(obs[,c("Run_Tissue_name", "slide_ID", "fov")])
+    binSize <- 40
     
-    slideFOVs <- unique(obs[,c("Run_Tissue_name", "slide_ID", "fov")])
-    firstFOV <- which(!duplicated(slideFOVs$Run_Tissue_name))
-    
-    NULLList <- lapply(seq_len(nrow(slideFOVs)), function(idx){
-      qc <- tiledb::tiledb_query_condition_combine(
-        tiledb::tiledb_query_condition_init("slideID", slideFOVs$slide_ID[idx], "INT32", "EQ"),
-        tiledb::tiledb_query_condition_init("fov", slideFOVs$fov[idx], "INT32", "EQ"),
-        "AND")
+    for(slideName in unique(slideFOVs$Run_Tissue_name)){
+      slideFOVs <- slideFOVsAll[slideFOVsAll$Run_Tissue_name == slideName,]
+      numFOVs <- nrow(slideFOVs)
+      nbins <- ceiling(numFOVs / binSize)
       
-      tCoords <- rbind(tiledb_array(study$somas$RNA$obsm$members$transcriptCoords$uri, 
-                                    query_condition=qc, return_as="data.frame")[], 
-                       tiledb_array(study$somas$negprobes$obsm$members$transcriptCoords$uri, 
-                                    query_condition=qc, return_as="data.frame")[])
+      startOfBin <- sequence(from = 1, by = binSize, nvec = nbins)
+      endOfBin <- sequence(from = binSize, by = binSize, nvec = nbins)
       
-      
-      if("falsecode" %in% names(study$somas)){
-        tCoords <- rbind(tCoords, tiledb_array(study$somas$falsecode$obsm$members$transcriptCoords$uri, 
-                                               query_condition=qc, return_as="data.frame")[])
+      if(nbins == 1){
+        endOfBin[nbins] <- numFOVs
+      }else if(numFOVs - endOfBin[nbins - 1] < binSize/4){
+        endOfBin[nbins - 1] <- numFOVs
+        endOfBin <- endOfBin[-nbins]
+        startOfBin <- startOfBin[-nbins]
+      }else{
+        endOfBin[nbins] <- numFOVs
       }
       
+      bins <- cbind(slideFOVs[startOfBin,c("Run_Tissue_name", "slide_ID")], 
+                    lower.fov=slideFOVs[startOfBin, "fov"], 
+                    upper.fov=slideFOVs[endOfBin,"fov"])
       
-      if(!"y_slide_mm" %in% study$somas$RNA$obsm$members$transcriptCoords$attrnames()){
-        abs_locs <- locs[locs$Slide == slideFOVs$slide_ID[idx] & 
-                           locs$FOV == slideFOVs$fov[idx],]
+      NULLList <- lapply(seq_len(nrow(bins)), function(idx){
+        qc <- tiledb::tiledb_query_condition_combine(
+          tiledb::tiledb_query_condition_init("slideID", bins$slide_ID[idx], "INT32", "EQ"),
+          tiledb::tiledb_query_condition_combine(
+            tiledb::tiledb_query_condition_init("fov", bins$lower.fov[idx], "INT32", "GE"), 
+            tiledb::tiledb_query_condition_init("fov", bins$upper.fov[idx], "INT32", "LE"),
+            "AND"), "AND")
         
-        tCoords[, "x_slide_mm"] <- (tCoords[, "x_FOV_px"])*pixel_size + abs_locs[["X_mm"]]
-        tCoords[, "y_slide_mm"] <- (-tCoords[, "y_FOV_px"])*pixel_size + abs_locs[["Y_mm"]]
-      }
-      
-      tCoords <- tCoords[order(tCoords$slideID, tCoords$fov, tCoords$CellId), 
-                         c("fov", "CellId", "cell_id", coords, "z_FOV_slice", 
-                           "target", "CellComp")]
-      
-      # Seurat export needs to be in pixels not mm will rename column before exporting
-      tCoords$x_slide_mm <- mm_to_pixel(tCoords$x_slide_mm, pxToUm)
-      tCoords$y_slide_mm <- mm_to_pixel(tCoords$y_slide_mm, pxToUm)
-      
-      colnames(tCoords)[grep("x_FOV_px", colnames(tCoords))] <- "x_local_px"
-      colnames(tCoords)[grep("y_FOV_px", colnames(tCoords))] <- "y_local_px"
-      colnames(tCoords)[grep("x_slide_mm", colnames(tCoords))] <- "x_global_px"
-      colnames(tCoords)[grep("y_slide_mm", colnames(tCoords))] <- "y_global_px"
-      colnames(tCoords)[grep("z_FOV_slice", colnames(tCoords))] <- "z"
-      colnames(tCoords)[grep("cell_id", colnames(tCoords))] <- "cell"
-      colnames(tCoords)[grep("CellId", colnames(tCoords))] <- "cell_ID"
-      
-      slideName <- gsub("\\W", "",slideFOVs$Run_Tissue_name[idx])
-      
-      data.table::fwrite(file = paste0("output/",slideName, "/", slideName,"_tx_file", fileType), 
-                         x = tCoords, quote = FALSE, sep = ",",
-                         row.names = FALSE, append = ifelse(idx %in% firstFOV, FALSE, TRUE), 
-                         col.names = ifelse(idx %in% firstFOV, TRUE, FALSE))
-      
-    })
+        tCoords <- rbind(tiledb_array(study$somas$RNA$obsm$members$transcriptCoords$uri, 
+                                      query_condition=qc, return_as="data.frame")[], 
+                         tiledb_array(study$somas$negprobes$obsm$members$transcriptCoords$uri, 
+                                      query_condition=qc, return_as="data.frame")[])
+        
+        
+        if("falsecode" %in% names(study$somas)){
+          tCoords <- rbind(tCoords, tiledb_array(study$somas$falsecode$obsm$members$transcriptCoords$uri, 
+                                                 query_condition=qc, return_as="data.frame")[])
+        }
+        
+        if(!"y_slide_mm" %in% study$somas$RNA$obsm$members$transcriptCoords$attrnames()){
+          tCoords$x_slide_mm <- 0
+          tCoords$y_slide_mm <- 0
+          for(fov in bins$lower.fov[idx]:bins$upper.fov[idx]){
+            fovTx <- which(tCoords$fov == fov)
+            
+            abs_locs <- locs[locs$Slide == bins$slide_ID[1L] & 
+                               locs$FOV == fov,]
+            
+            tCoords[fovTx, "x_slide_mm"] <- (tCoords[fovTx, "x_FOV_px"])*pixel_size + abs_locs[["X_mm"]]
+            tCoords[fovTx, "y_slide_mm"] <- (-tCoords[fovTx, "y_FOV_px"])*pixel_size + abs_locs[["Y_mm"]]
+          }
+        }
+        
+        tCoords <- tCoords[order(tCoords$slideID, tCoords$fov, tCoords$CellId), 
+                           c("fov", "CellId", "cell_id", coords, "z_FOV_slice", 
+                             "target", "CellComp")]
+        
+        # Seurat export needs to be in pixels not mm will rename column before exporting
+        tCoords$x_slide_mm <- mm_to_pixel(tCoords$x_slide_mm, pxToUm)
+        tCoords$y_slide_mm <- mm_to_pixel(tCoords$y_slide_mm, pxToUm)
+        
+        colnames(tCoords)[grep("x_FOV_px", colnames(tCoords))] <- "x_local_px"
+        colnames(tCoords)[grep("y_FOV_px", colnames(tCoords))] <- "y_local_px"
+        colnames(tCoords)[grep("x_slide_mm", colnames(tCoords))] <- "x_global_px"
+        colnames(tCoords)[grep("y_slide_mm", colnames(tCoords))] <- "y_global_px"
+        colnames(tCoords)[grep("z_FOV_slice", colnames(tCoords))] <- "z"
+        colnames(tCoords)[grep("cell_id", colnames(tCoords))] <- "cell"
+        colnames(tCoords)[grep("CellId", colnames(tCoords))] <- "cell_ID"
+        
+        slideName <- gsub("\\W", "",slideFOVs$Run_Tissue_name[idx])
+        
+        data.table::fwrite(file = paste0("output/",slideName, "/", slideName,"_tx_file", fileType), 
+                           x = tCoords, quote = FALSE, sep = ",",
+                           row.names = FALSE, append = ifelse(idx == 1, FALSE, TRUE), 
+                           col.names = ifelse(idx == 1, TRUE, FALSE))
+      })
+    }
     
     rm(NULLList)
     gc()
@@ -462,7 +491,12 @@ if(transcripts == TRUE){
 if(polygons == TRUE){
   message("Generating Cell Polygon file")
   
-  rminiconda::rminiconda_pip_install(pkg_name = c("opencv-python"), name = "nanopipeline_python")
+  if(grepl("cn", s3Region)){
+    rminiconda::rminiconda_pip_install(pkg_name = c("opencv-python==4.8.0.74"), name = "nanopipeline_python",
+                                       "-i https://mirrors.aliyun.com/pypi/simple/")
+  }else{
+    rminiconda::rminiconda_pip_install(pkg_name = c("opencv-python==4.8.0.74"), name = "nanopipeline_python")
+  }
   
   # Module Code
   pyscript <- 
@@ -609,7 +643,6 @@ def GetPolygon(image, cell_ids):
     }
   }
 }
-
 
 ################################## Move to S3 ##################################
 system2(command = "aws", args = c("s3", "mv", "output/", paste0(outPath, studyName, "/"),

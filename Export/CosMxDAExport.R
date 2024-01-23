@@ -1,5 +1,5 @@
 # CosMxDA Export Custom Module
-message("Custom Script Version: 1.2.2")
+message("Custom Script Version: 1.2.3")
 
 # Copyright 2023 NanoString Technologies, Inc.
 # This software and any associated files are distributed pursuant to the NanoString AtoMx Spatial 
@@ -431,6 +431,10 @@ if(SeuratObject == TRUE){
     sem <- suppressWarnings(toFullSeuratObject(tiledbsc_dataset = study,transcripts = transcripts))
   }else{
     sem <- suppressWarnings(study$to_seurat(batch_mode = TRUE))
+    Seurat::DefaultAssay(sem) <- "RNA"
+    
+    obs <- study$somas$RNA$obs$to_dataframe()
+    sem@meta.data <- obs[match(colnames(sem), rownames(obs)),]
     
     for(i in names(sem@reductions)){
       sem@reductions[[i]]@assay.used <- "RNA"
