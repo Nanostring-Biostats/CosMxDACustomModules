@@ -1,5 +1,8 @@
-v1.2.2 (9/25/2023)
-- Fixed non-required variable checking 
+v1.2.3 (1/22/2023)
+- Fixed Seurat metadata adding
+
+v1.2.2 (10/2/2023)
+- Fixed non-required variable tests
 
 v1.2.1 (9/12/2023)
 - Fixed Seurat reduction assay.name
