@@ -1,0 +1,5 @@
+v1.0.1
+- Updated plot aesthetics
+
+v1.0.0
+- Initial Release
