@@ -1,5 +1,5 @@
 # Name: SMIDA RNA QC Flowcell Plots Custom Module
-message("Customer Script Version: 1.0.0")
+message("Customer Script Version: 1.0.1")
 
 # Copyright 2024 NanoString Technologies, Inc.
 # This software and any associated files are distributed pursuant to the NanoString AtoMx Spatial 
@@ -72,8 +72,8 @@ print("created additional columns in long negprobe data")
 
 # Calculate the mean of the negprobes per plex per cell:
 neg_probe_avg <- neg_long %>% group_by(Run_Tissue_name, fov) %>%
-  summarise(Mean_Negative_Probe_Per_Cell_Per_FOV = mean(Count))
-print("Calcualted mean NegProbe per cell per FOV")
+  summarise(Mean_Negative_Probe_Per_Plex_Per_Cell_Per_FOV = mean(Count))
+print("Calcualted mean NegProbe per plex per cell per FOV")
 
 ###### SystemControl Counts ########
 fc2 <- fc@counts
@@ -96,8 +96,8 @@ print("created additional columns in long SystemControl data")
 
 # Calculate the mean of the falseCodes per plex per cell:
 fc_avg <- fc_long %>% group_by(Run_Tissue_name, fov) %>%
-  summarise(Mean_SystemControl_Per_Cell_Per_FOV = mean(Count))
-print("Calcualted mean SystemControl count per cell per FOV")
+  summarise(Mean_SystemControl_Per_Plex_Per_Cell_Per_FOV = mean(Count))
+print("Calculated mean SystemControl count per plex per cell per FOV")
 
 
 #### Other QC metrics #####
@@ -163,29 +163,27 @@ ggsave("/output/Number_Cells_per_FOV.png", plot = p3, device = "png")
 
 
 # Mean negative probes per plex per cell per FOV 
-p4 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_Negative_Probe_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
+p4 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_Negative_Probe_Per_Plex_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
   geom_violin() + geom_jitter(width=0.25, height=0, size = 0.5) +  
   geom_boxplot(width=0.2, outlier.shape = NA) +
   scale_fill_manual(values=alpha(pal,0.3)) +
-  xlab("Flowcell") + ylab("Mean NegProbe Count Per Cell Per FOV") +
+  xlab("Flowcell") + ylab("Mean NegProbe Count Per Plex Per Cell Per FOV") +
   theme_bw() +
-  scale_y_continuous(labels = scales::comma, breaks=seq(0, max(allqc_final$Mean_Negative_Probe_Per_Cell_Per_FOV + 0.1), 0.02)) +
   theme(legend.position="none", axis.text.x = element_text(angle=90, vjust=0.5))
 
-ggsave("/output/Mean_NegProbeCount_per_Cell_per_FOV.png", plot = p4, device = "png")
+ggsave("/output/Mean_NegProbeCount_Per_Plex_per_Cell_per_FOV.png", plot = p4, device = "png")
 
 
 # Mean SystemControl per plex per cell per FOV
-p5 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_SystemControl_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
+p5 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_SystemControl_Per_Plex_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
   geom_violin() + geom_jitter(width=0.25, height=0, size = 0.5) +  
   geom_boxplot(width=0.2, outlier.shape = NA) +
   scale_fill_manual(values=alpha(pal,0.3)) +
-  xlab("Flowcell") + ylab("Mean SystemControl Count Per Cell Per FOV") +
+  xlab("Flowcell") + ylab("Mean SystemControl Count Per Plex Per Cell Per FOV") +
   theme_bw() +
-  scale_y_continuous(labels = scales::comma, breaks=seq(0, max(allqc_final$Mean_SystemControl_Per_Cell_Per_FOV + 0.1), 0.02)) +
   theme(legend.position="none", axis.text.x = element_text(angle=90, vjust=0.5))
 
-ggsave("/output/Mean_SystemControlCount_per_Cell_per_FOV.png", plot = p5, device = "png")
+ggsave("/output/Mean_SystemControlCount_Per_Plex_per_Cell_per_FOV.png", plot = p5, device = "png")
 
 # Mean unique transcripts per cell per FOV
 p6 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_Unique_Transcripts_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
@@ -199,3 +197,4 @@ p6 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_Unique_Transcripts_Per_C
 ggsave("/output/Mean_Unique_Transcripts_per_Cell_per_FOV.png", plot = p6, device = "png")
 
 print("All plots complete")
+
