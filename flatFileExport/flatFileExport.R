@@ -1,7 +1,7 @@
 # Name: Flat File Export Custom Module
 message("Custom Script Version: 1.1.1")
 
-# Copyright 2023 NanoString Technologies, Inc.
+# Copyright 2023-2024 Bruker Spatial Biology, Inc.
 # This software and any associated files are distributed pursuant to the NanoString AtoMx Spatial 
 # Information Platform Software as a Service Agreement, available on the NanoString Technologies, Inc 
 # website at www.nanostring.com, as updated.  All rights reserved.  No permission is granted to modify, 
