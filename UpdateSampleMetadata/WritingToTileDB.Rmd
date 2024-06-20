@@ -166,7 +166,7 @@ knitr::include_graphics("Images/downloadFile.png")
 
 For results larger than 600 Mb, above the downloadable limit, writing to another source is possible. Below we will provide an example to writing to your S3 bucket. Other methods are possible but are beyond the scope of this vignette. 
 
-To write to your personal S3, you will need to provide your AWS credentials and save them in the custom module. An example of this is in the [export custom module](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/b9c410e0901974b2a8e3993d475b0fca2c2889e1/Export/CosMxDAExport.R#L316). This gives the environment write access. 
+To write to your personal S3, you will need to provide your AWS credentials and save them in the custom module. An example of this is in the [export custom module](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/c0ac225d3160be0603a2789c3a52602f41cc45cb/Export/CosMxDAExport.R#L316). This gives the environment write access. 
 
 
 ```{r, S3 write access, eval = FALSE}
@@ -403,7 +403,7 @@ identical(obs, obsNew)
 
 In v1.3.2, custom modules will allow for .csv files to be taken in as inputs. Using this variable, we can now update the metadata with user generated metadata.
 
-Using the [GetMetadata.R script](), the cell metadata will be downloaded and able to be edited and reentered into AtoMx. If the module errors, you will most likely get an error saying that metadata is larger than the allowed downloadable file so download should occur using the [flat file export custom module](https://github.com/Nanostring-Biostats/CosMxDACustomModules/tree/main/flatFileExport) or button (in v1.3).
+Using the [GetSampleMetadata.R script](), the cell metadata will be downloaded and able to be edited and reentered into AtoMx. If the module errors, you will most likely get an error saying that metadata is larger than the allowed downloadable file so download should occur using the [flat file export custom module](https://github.com/Nanostring-Biostats/CosMxDACustomModules/tree/main/flatFileExport) or button (in v1.3).
 
 These variables need to be set in the Custom Module builder so in the custom module they will not be set. We will set them here to allow the vignette to continue running.
 

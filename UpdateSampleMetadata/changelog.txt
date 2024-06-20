@@ -1,2 +1,2 @@
-# Version 1.0 - Date
+# Version 1.0 - June 20, 2024
 Initial release
