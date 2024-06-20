@@ -1,0 +1,446 @@
+---
+title: "Advanced custom module writing: Writing back to TileDB cell metadata"
+author:
+- name: Maddy Griswold
+  affiliation: NanoString Technologies, Inc
+- name: Evelyn Metzger
+  affiliation: NanoString Technologies, Inc
+abstract: >
+    In this document we walk through how to write a custom module in AtoMx&trade; 
+    Spatial Informatics Platform (SIP) that writes back to the TileDB backend object,
+    allowing these results to be used in downstream analyses and visualizations. 
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+    BiocStyle::html_document:
+        toc: true
+        toc_float: true
+vignette: >
+    %\VignetteIndexEntry{Advanced custom module writing}
+    %\VignetteEncoding{UTF-8}
+    %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+    chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Introduction
+
+AtoMx SIP is a powerful, cloud-based end-to-end solution for analyzing CosMx&trade; data. This means that users can take a study from initial data and translate that directly to biological insight without needing to understand how to program or maintain costly computing hardware or facilities. 
+
+With CosMx data, there are a myriad of ways that users can interact, analyze, and discover their single cell data in space. During this process, there are times where additional cell-level metadata can be beneficial for i) existing SIP analysis modules and/or ii) a user's custom analysis modules. For example, during the discovery process, a user may identify unique groupings of cells that they would like to annotate and use as a contrast for the [Differential Expression Module](https://university.nanostring.com/cosmx-smi-data-analysis-user-manual-software-v13/1882031). 
+
+This vignette describes the procedures needed for a user to add cell-level metadata to their study. The target audience for this vignette is anyone familar with coding in [R](https://www.r-project.org/) who has an AtoMx account. For those unfamiliar with custom modules in AtoMx, you may be interested in our [documentation for building custom modules in AtoMx](https://university.nanostring.com/cosmx-smi-data-analysis-user-manual-software-v13/1882031) or a list of currently available custom modules from NanoString on our [GitHub page](https://github.com/Nanostring-Biostats/CosMxDACustomModules). The [RNAQCPlots](https://github.com/Nanostring-Biostats/CosMxDACustomModules/tree/main/RNAQCPlots) is a good starting custom module. It requires no data manipulation or S3 access, just producing and saving plots. 
+
+Here we will walk through an advanced custom module. This vignette will also make use of functions that access the backend storage infrastructure of the data so that your new cell-level metadata can be used in downstream analyses. Knowledge of [TileDB](https://docs.tiledb.com/main) and [AWS CLI](https://docs.aws.amazon.com/cli/latest/reference/) would be beneficial but not required. Let’s get started!
+
+
+# Custom module environment
+
+Custom modules allow you to run custom R analyses in the AtoMx environment without exporting your data. This environment does require users to work with our TileDB backend. In the [export vignette](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/Export/exportFunctionVignette.html), we talk about how to interact with the TileDB array retrieving data, but in this vignette we will focus on the functions to write back to the array, allowing for further analysis within AtoMx, along with tips and tricks for working in the custom module environment. 
+
+> Warning: Overwriting the TileDB array is irreversible. If a mistake is made, you will need to recreate the study in AtoMx.  
+
+Currently, the only part of the TileDB array that can be altered and used in downstream analyses or visualizations in AtoMx is the cell metadata. In this vignette, we will walk through how to write a custom module to modify the cell metadata within AtoMx.
+
+All current custom modules can be found [here](https://github.com/Nanostring-Biostats/CosMxDACustomModules) that can serve as inspiration for your own custom module. 
+
+> Pro Tip: It is recommended to develop the custom module outside of AtoMx using an exported TileDB array. The custom module environment is not a sandbox environment in R Studio, all code is expected to be a finished script. Error checking and investigative analyses are difficult in its current state.
+
+> Pro Tip: While code development should be done locally on Rstudio, you may encounter errors when running the custom module on AtoMx for the first time. Some iteration is possible while learning the AtoMx environment. 
+
+
+## Environment on start
+
+The custom module environment comes pre-loaded with 2 variables and many of the most popular R packages. 
+
+Up-to-date packages and version can found by running a custom module with `sessionInfo()`.
+
+Pre-loaded Variables:
+  
+  - `study`: TileDB SOMACollection object
+  
+  - `studyDirectory`: AWS S3 location of TileDB array 
+  
+  
+If we were to load these variables into R it would look something like this. Here we are loading variables in the vignette environment to simulate the custom module environment. This section of code is **NOT** needed in a custom module as these variables are natively available. 
+
+> Pro Tip: It is recommended to do custom module development on a TileDB array on S3 since that is how it is stored in AtoMx. There are some nuances to working with S3 that can be missed if working with a local array. It it not required to test on data on S3 but you might encounter errors when moving to the custom module environment, particularly if reading/writing files. 
+
+```{r, s3 uri, echo = FALSE}
+studyDirectory <- "s3://nstg-analytics-research/mgriswold-outputs/wtx/"
+
+aws_creds <- rjson::fromJSON(paste(system2("aws", 
+                                           args = c("configure",
+                                                    "export-credentials", 
+                                                    "--profile", "default"), 
+                                           stdout = TRUE), collapse = "")) 
+
+cfg <- tiledb::tiledb_config() 
+cfg["vfs.s3.region"] <- "us-west-2"
+cfg["vfs.s3.aws_access_key_id"] <- aws_creds$AccessKeyId
+cfg["vfs.s3.aws_secret_access_key"] <- aws_creds$SecretAccessKey
+cfg["vfs.s3.aws_session_token"] <- aws_creds$SessionToken
+ctx <- tiledb::tiledb_ctx(cfg)
+
+study <- tiledbsc::SOMACollection$new(uri = studyDirectory, 
+                                      ctx = ctx, verbose = FALSE)
+
+rm(cfg, ctx, aws_creds)
+```
+
+```{r, show s3 uri, eval = FALSE}
+# Input TileDB array URI
+# **NOT** needed in a custom module simulating natively available variables
+studyDirectory <- "s3://aws-s3-bucket-name/folderX/TileDB-array-folder/"
+```
+
+If your data is on S3, which is recommended to fully simulate the SMDIA environment, follow the steps below. Otherwise, skip the `cfg` & `ctx` steps and remove the `ctx` variable from the `SOMACollection$new` call. 
+
+```{r, setup environment, eval=FALSE}
+# configure TileDB S3
+# **NOT** needed in a custom module simulating natively available variables
+cfg <- tiledb::tiledb_config() 
+cfg["vfs.s3.region"] <- "us-west-2"
+cfg["vfs.s3.aws_access_key_id"] <- "AccessKeyId"
+cfg["vfs.s3.aws_secret_access_key"] <- "SecretAccessKey"
+cfg["vfs.s3.aws_session_token"] <- "SessionToken"
+ctx <- tiledb::tiledb_ctx(cfg)
+
+study <- tiledbsc::SOMACollection$new(uri = studyDirectory, 
+                                      ctx = ctx, verbose = FALSE)
+
+rm(cfg, ctx, aws_creds)
+```
+ 
+### SOMACollection object
+
+One of the main R variables that we will use in this vignette is pre-loaded and named `study`. At a low level, `study` is a collection of **S**tack **o**f **M**atrices, **A**nnotated (SOMAcollection) object. [SOMA](https://github.com/single-cell-data/SOMA) is an open data model for representing annotated matrices, like those commonly used for single-cell data analysis. A SOMACollection contains multiple SOMAs. In CosMx SMI data, there is a SOMA for target RNA species, negative control probes, and FalseCodes. Each SOMA follows the [AnnData shape](https://anndata.readthedocs.io/en/latest/). 
+
+CosMx count data are stored in the *RNA SOMA*. For techincal reasons, this soma name is used regardless of analyte (_i.e._, both RNA and protein count data are placed in the “RNA” SOMA). 
+
+There are rules for AnnData shaped objects, but the most important is dimension consistency across object. All matrices, except `uns`, are expected to be in the same order as the count matrix.
+
+For more details on this object please see our [export vignette](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/Export/exportFunctionVignette.html). 
+
+```{r, echo=FALSE, fig.cap="AnnData structure. In this schematic, X refers to a counts matrix with the number of rows equal to the number of cells (“observations”, “obs”) and the number of columns equal to the number of transcripts, proteins, negative probes, or false codes (“variables”, “var”). For more information of annData, see [here](https://anndata.readthedocs.io/en/latest/)."}
+knitr::include_graphics("Images/anndata_schema.svg")
+```
+
+## Outputing results
+
+The previous section touched on the main object that we will modify to add cell-level metadata. This section goes over the main output types: R output, data output that can be downloaded locally, and data output directly to AWS S3.
+
+### R Console
+
+Any output to the R console is saved in the `r.err` file that is downloadable from the log files. In addition, any R failure and its traceback are available in the `r.out` file in the logs. 
+
+```{r, echo=FALSE, fig.cap="Example of the AtoMx SIP pipeline orchestrator with custom module. Once finished (i.e., green or red ribbon), click left red square where run information can be viewed (e.g., peak memory usage) as well as a download button (rightmost red square) that downloads the `r.err` and `r.out` log files (i.e., text files)."}
+knitr::include_graphics("Images/downloadLogs.png")
+```
+
+### `/output` folder
+
+If you would like a custom module to return results in a downloadable format, follow these steps. 
+
+Results (e.g., images, csv files, r data files) are expected to be saved in a reserved folder named “/output” (including leading “/“). In your module, it’s a good idea to explicitly create this directory via adding this code upstream of its use:
+
+```{r, create custom module, eval = FALSE}
+outdir <- "/output"
+if(!dir.exists(outdir)){
+	dir.create(outDir)
+}
+```
+
+At the conclusion of the custom module execution, everything in the /output folder will be zipped up and ready for download (see Figure 3).
+
+> Note: There is a 600 MB limit when downloading data with the local download method. This is great when modules produce figures and “small” result files. Some caution should be used when returning high-resolution vector plots (e.g., SVG) with millions of points as these can be large and there is no error checking before zipping the data. For large data results, please see the following section on returning results to your S3 bucket. 
+
+```{r, echo=FALSE, fig.cap="Download results from custom module. Once finished (i.e., green or red ribbon), click the red square icon to download the results in from the zipped /output folder."}
+knitr::include_graphics("Images/downloadFile.png")
+```
+
+### Output to S3
+
+For results larger than 600 Mb, above the downloadable limit, writing to another source is possible. Below we will provide an example to writing to your S3 bucket. Other methods are possible but are beyond the scope of this vignette. 
+
+To write to your personal S3, you will need to provide your AWS credentials and save them in the custom module. An example of this is in the [export custom module](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/b9c410e0901974b2a8e3993d475b0fca2c2889e1/Export/CosMxDAExport.R#L316). This gives the environment write access. 
+
+
+```{r, S3 write access, eval = FALSE}
+if(exists("session_token")){
+  session_token <- paste("aws_session_token =", session_token)
+}else{
+  session_token <- NULL
+}
+
+dir.create("~/.aws")
+
+fileConn<-file("~/.aws/credentials")
+# [export] is the profile name, this can be anything you chose
+writeLines(c("[export]",paste("aws_access_key_id =", access_key), 
+             paste("aws_secret_access_key =", secret_key), 
+             session_token), fileConn)
+close(fileConn)
+```
+
+After the environment has write access the easiest way to write to S3 is to write the file locally and then move it to S3 using the profile set in the code above. 
+
+```{r, move to S3, eval = FALSE}
+saveRDS(seuratObj, "seuratObject.RDS"))
+
+outPath <- "s3://aws-s3-bucket-name/folderX/"
+
+# move folder to user S3 bucket
+system2(command = "aws", args = c("s3", "mv", "seuratObject.RDS", 
+                                  paste0(outPath, "seuratObject.RDS", "/"), 
+                                  "--recursive", "--profile", "export"), 
+        stdout = FALSE)
+```
+
+The `system2` command is the same as on the CMD just called in R:
+
+`aws s3 mv seuratObject.RDS s3://aws-s3-bucket-name/folderX/seuratObject.RDS --recursive --profile export`
+
+## Quick Overview of Building a Custom Module
+
+Before diving into a custom module to add cell-level data, this section does a quick review of building a simple custom module. It is useful for defining how to build a custom module in AtoMx SIP and how to execute it. 
+
+### Variables in AtoMx
+
+Modules in AtoMx can accept user-defined variables and this is the same for custom modules. These variables are set in the UI when creating a custom module. These variables can be a number, string, boolean, uploaded file (v1.3.2+), or private (v1.3.3+).
+
+> Pro Tip: There is some conversion of data types needed to translate input given in AtoMx (Bool, String, Num) into the R data types (logic, character, numeric). File variables will return a local file path.
+
+> Pro Tip: Private parameters must be string variables. These parameters will not be shown in the UI or printed in any logs.
+
+This custom module build needs to only be defined once. Once these variables are created, they will be part of the graphical user interface during the execution of the module (see 
+Figure 4). 
+
+```{r, echo=FALSE, fig.cap="Building a Custom Module. While creating a custom module, a user can add user defined arguments. These arguments can be a numeric, string, boolean, file (v1.3.2+), or private (v1.3.3+) type."}
+knitr::include_graphics("Images/User-DefinedVars.png")
+```
+
+User-defined variables can then be set during the pipeline generation like the normal modules. Click on the gear icon on the module to view the variables that can be set within the module.
+
+```{r, echo=FALSE, fig.cap="Example of user-defined variables UI. After clicking on the gear icon, changable variables are shown in the UI."}
+knitr::include_graphics("Images/WorkingWIthUser-DefinedVars.png")
+```
+
+### Variables in Custom Modules
+
+When writing a custom module, the user-defined variables are variables that are expected in the script but are never set within the code. 
+
+The custom module environment is more like the inside of a function where variables are implicitly already set. In a custom module, the variables are expected to be outside of the code and in the UI. We will walk through an example of this in the next section.
+
+
+### Working example
+
+Let's walk through this example with screenshots of the UI.
+
+When building the custom module, we have added two required numeric variables named `a` and `b`.
+
+```{r, echo=FALSE, fig.cap="Example of filled in custom module generator. When completed, a custom module generator screen should have a Module name, attached R script, and user defined arguments if applicable."}
+knitr::include_graphics("Images/sumExampleSetup.png")
+```
+
+These variables will be added together in the code.  
+
+```{r, echo=FALSE, fig.cap="Example of the Code tab in the custom module generator. The attached R file can be viewed in the Code tab."}
+knitr::include_graphics("Images/sumExampleCode.png")
+```
+
+These variables are set by clicking on the gear icon on the module.
+
+```{r, echo=FALSE, fig.cap="Example of completed custom module in the Pipeline Orchestrator. After generating the custom module, it can be attached and run in a pipeline just like a normal module."}
+knitr::include_graphics("Images/sumExampleVars.png")
+```
+
+After running the module the output is printed in r.err because the output of `a+b` will be printed to the screen rather than saved to disk as a .csv for example.  
+
+# Code for adding and saving cell-level metadata
+
+To be consistent with the AnnData shape, we will call the cell metadata object `obs` throughout this section. This section and the associated custom modules can be updated to work with target metadata by replacing all mentions of `obs` with `var`. Changes to target metadata will not be apparent in AtoMx. 
+
+The basic premise of adding columns to TileDB metadata is: 
+
+  1. add the column to the locally read in data
+  2. delete metadata portion of TileDB array
+  3. replace portion with updated metadata
+  
+This is the easiest/fastest way to update [the schema](https://docs.TileDB.com/main/background/key-concepts-and-data-format#array-schema) with the new column. 
+
+We can create a function to do this:
+
+```{r, update function}
+updateCellMetadata <- function(uri, obs, indexCol = "cell_ID"){
+  if(grepl("obs$", uri)){
+    obs$obs_id <- obs[[indexCol]] # keep index column in data frame
+    
+    tiledb::tiledb_vfs_remove_dir(uri = uri) # (2) delete TileDB array
+    tiledb::fromDataFrame(obj = as.data.frame(obs), uri = uri, 
+                          col_index = "obs_id") # (3) write TileDB array
+  }else{
+    stop("This function is only meant for cell metadata in the obs slot")
+  }
+}
+```
+
+There are many ways one could think of updating the cell metadata. We will walk through 3 methods here. 
+
+  1. Using results from a custom module
+  2. Updating a user-defined variable
+  3. Using an input file
+  
+Please see the [export vignette](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/Export/exportFunctionVignette.html) for a full look at TileDB syntax, but here is a quick reminder. All results follow a similar read-in pattern, the only thing that needs to change is the slot and result matrix names:
+
+study\$somas\$RNA\$\<**put slot name here**\>\$members\$\<**put result matrix name here**\>\$to_matrix()
+
+## From results in custom module
+
+```{r, fig.cap="Cell count quantiles. Example of analysis that can be done on the cell metadata and example of how to save resulting figures in the custom module environment", }
+library(ggplot2)
+
+obs <- study$somas$RNA$obs$to_dataframe() # get cell metadata
+uri <- study$somas$RNA$obs$uri            # get TileDB array location
+
+# state-of-the-art analysis
+bins <- stats::quantile(obs$nCount_RNA)
+
+newVar <- ifelse(obs$nCount_RNA >= bins["75%"], yes = "High", no = "Mid")
+newVar[which(obs$nCount_RNA <= bins["25%"])] <- "Low"
+
+table(newVar)
+
+obs$CellCountType <- newVar
+tail(colnames(obs))
+
+gp <- ggplot(obs, aes(x=CellCountType,y=nCount_RNA,color=CellCountType))+
+  geom_boxplot(outlier.shape=NA)+
+  geom_jitter(width=0.3, height=0, alpha=0.3, shape = ".", color = "black") + 
+  scale_y_log10()+
+  labs(y = "Total Counts per Cell", color = "Cell Count Bin")+
+  theme(axis.text.x = element_blank())
+
+#  making the plot downloadable
+ggsave("/output/plotName.jpg", gp)
+
+# for vignette
+gp
+
+# set updateCellMetadata function
+
+updateCellMetadata(uri = uri, obs = obs) # write updated cell metadata
+
+obsNew <- study$somas$RNA$obs$to_dataframe() # get updated cell metadata
+
+identical(obs, obsNew)
+```
+
+
+```{r, echo = FALSE}
+metaFile <- "~/output/cellMetadata.csv"
+rownames(obs) <- obs$cell_id
+write.csv(obs, file = metaFile, quote = FALSE, row.names = TRUE)
+```
+
+## From user-defined variable
+
+In this example, we will be walking through how to update the values in a specific column.
+
+Using the [GetSampleMetadata.R]() script with `columnNames = TRUE`, retrieve the column names from the cell metadata. 
+
+These variables need to be set in the Custom Module builder so in the custom module they will not be set. We will set them here to allow the vignette to continue running. 
+
+```{r, set variables}
+colName <- "CellCountType"   # from GetSampleMetadata.R columnNames output 
+merge_from <- "c('High', 'Mid', 'Low')" 
+merge_to <- "c('HighExpr', 'MidExpr', 'LowExpr')"  
+```
+
+> Pro Tip: Working with vectors in custom modules are a little tricky since they are saved as STRING values. Vectors will need to be split using the code below. 
+
+```{r, split vectors}
+vectorExample <- "c('a', 'b')"
+vectorExample
+
+vectorExample <- eval(parse(text = vectorExample))
+vectorExample
+```
+
+The custom module will look something like this. 
+
+```{r, user-defined variable module}
+merge_from <- eval(parse(text = merge_from))
+merge_to <- eval(parse(text = merge_to))
+
+if(length(merge_from) != length(merge_to)){
+  stop("Length of merge_from and merge_to must be the same")
+}
+
+obs <- study$somas$RNA$obs$to_dataframe() # get current cell metadata
+
+for(i in seq_len(length(merge_from))){
+  obs[[colName]] <- gsub(pattern = merge_from[i], 
+                         replacement = merge_to[i],
+                         obs[[colName]])
+}
+
+table(obs[[colName]])
+
+# set updateCellMetadata function
+
+updateCellMetadata(uri = uri, obs = obs) # write updated cell metadata
+
+obsNew <- study$somas$RNA$obs$to_dataframe() # get updated cell metadata
+
+identical(obs, obsNew)
+```
+
+## From input file
+
+In v1.3.2, custom modules will allow for .csv files to be taken in as inputs. Using this variable, we can now update the metadata with user generated metadata.
+
+Using the [GetMetadata.R script](), the cell metadata will be downloaded and able to be edited and reentered into AtoMx. If the module errors, you will most likely get an error saying that metadata is larger than the allowed downloadable file so download should occur using the [flat file export custom module](https://github.com/Nanostring-Biostats/CosMxDACustomModules/tree/main/flatFileExport) or button (in v1.3).
+
+These variables need to be set in the Custom Module builder so in the custom module they will not be set. We will set them here to allow the vignette to continue running.
+
+```{r, input file variable setting, eval = FALSE}
+metaFile <- "~/output/cellMetadata.csv"
+```
+
+The custom module will look something like this. 
+
+```{r, input file custom module}
+obs <- read.csv(metaFile)
+
+# set rownames
+rownames(obs) <- obs[,1L]
+obs <- obs[,-1L]
+
+# set updateCellMetadata function
+
+updateCellMetadata(uri = uri, obs = obs) # write updated cell metadata
+
+obsNew <- study$somas$RNA$obs$to_dataframe() # get updated cell metadata
+
+identical(obs, obsNew)
+```
+
+# Writing to other parts of TileDB array
+
+While you can only use the changes to cell metadata in AtoMx, you can always export the TileDB array to view other results. 
+
+To write other results to TileDB there are similar functions to `fromDataFrame` that can be used depending on what portion you are updating. 
+
+```{r, eval=FALSE}
+?tiledb::fromMatrix() 
+?tiledb::fromSparseMatrix()
+```
+
+# Update to TileDB package in AtoMx
+
+We are planning an update to the TileDB package used in late 2024-early 2025. This vignette might become out of date with that update. We will update this vignette accordingly.
+
