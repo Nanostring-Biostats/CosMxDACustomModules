@@ -1,5 +1,5 @@
 # Name: SMIDA RNA QC Flowcell Plots Custom Module
-message("Customer Script Version: 1.0.1")
+message("Customer Script Version: 1.1")
 
 # Copyright 2024 Bruker Spatial Biology, Inc.
 # This software and any associated files are distributed pursuant to the NanoString AtoMx Spatial 
@@ -14,8 +14,6 @@ message("Customer Script Version: 1.0.1")
 # Load Packages
 library(ggplot2)
 library(dplyr)
-library(reshape2)
-library(stringr)
 library(scales)
 
 # Module Code
@@ -23,14 +21,13 @@ dir.create("/output")
 print("Loaded packages, created output folder")
 
 ### Load data ###
-obs_qc <- study$somas$RNA$obs$to_dataframe()
+attrs <- study$somas$RNA$obs$attrnames()
+cols <- c("Run_Tissue_name", "slide_ID_numeric", "fov", "nCell",
+          attrs[c(grep("nCount", attrs), grep("nFeature", attrs))])
+obs_qc <- study$somas$RNA$obs$to_dataframe(cols)
 print("Loaded obs_qc")
-neg <- study$somas$negprobes$to_seurat_assay(layers='counts')
-print("loaded negprobe data")
-raw <- study$somas$RNA$X$members$counts$to_dataframe()
-print("loaded raw data")
-fc <-  study$somas$falsecode$to_seurat_assay(layers='counts')
-print("loaded false codes")
+
+gc()
 
 ### Adjust color palette as necessary ###
 pal <- c("#3A6CA1", "#FFD861", "#D86769", "#AEE8E2", "#999999", "#FABFD2", "#318026", "#A66293", "#F28E2B", "#E3C0AC",
@@ -46,87 +43,31 @@ if(total > length(pal)) {
 print("set color palette")
 length(pal)
 
+#### QC metrics #####
 
+nNeg <- length(study$somas$negprobes$var$ids())
+nFC <- length(study$somas$falsecode$var$ids())
 
-###### NegProbe Counts ########
-neg <- neg@counts
-print("neg <- neg@counts")
-neg_counts <- as.data.frame(t(as.matrix(neg)))
-print("transposed and converted negprobe data to dataframe")
-neg_counts$Cell_ID <- rownames(neg_counts)
-neg_long <- melt(neg_counts,
-                 id.vars=c('Cell_ID'),
-                 variable.name="NegProbe",
-                 value.name="Count"
-)
-print("transformed negprobe data to long")
-
-## Modify NegProbe data
-cols <- c("Run_Tissue_name","cell_id")
-neg_long[c("c","slide_ID_numeric","fov","cell")] <-  str_split_fixed(neg_long$Cell_ID, "_",4)
-neg_long$slide_fov <- paste0(neg_long$slide_ID_numeric, "_", neg_long$fov)
-obs_flowcell <- obs_qc[,cols]
-neg_long_fc <- base::merge(neg_long, obs_flowcell, by.x="Cell_ID", by.y="cell_id", all.x=T )
-neg_long <- neg_long_fc
-print("created additional columns in long negprobe data")
-
-# Calculate the mean of the negprobes per plex per cell:
-neg_probe_avg <- neg_long %>% group_by(Run_Tissue_name, fov) %>%
-  summarise(Mean_Negative_Probe_Per_Plex_Per_Cell_Per_FOV = mean(Count))
-print("Calcualted mean NegProbe per plex per cell per FOV")
-
-###### SystemControl Counts ########
-fc2 <- fc@counts
-fc_counts <- as.data.frame(t(as.matrix(fc2)))
-fc_counts$Cell_ID <- rownames(fc_counts)
-fc_long <- melt(fc_counts,
-                id.vars=c('Cell_ID'),
-                variable.name="SystemControl",
-                value.name="Count"
-)
-
-## Modify FalseCode data
-cols <- c("Run_Tissue_name","cell_id")
-fc_long[c("c","slide_ID_numeric","fov","cell")] <-  str_split_fixed(fc_long$Cell_ID, "_",4)
-fc_long$slide_fov <- paste0(fc_long$slide_ID_numeric, "_", fc_long$fov)
-obs_flowcell <- obs_qc[,cols]
-fc_long_fc <- base::merge(fc_long, obs_flowcell, by.x="Cell_ID", by.y="cell_id", all.x=T )
-fc_long <- fc_long_fc
-print("created additional columns in long SystemControl data")
-
-# Calculate the mean of the falseCodes per plex per cell:
-fc_avg <- fc_long %>% group_by(Run_Tissue_name, fov) %>%
-  summarise(Mean_SystemControl_Per_Plex_Per_Cell_Per_FOV = mean(Count))
-print("Calculated mean SystemControl count per plex per cell per FOV")
-
-
-#### Other QC metrics #####
 qc_stats = obs_qc %>% group_by(Run_Tissue_name, fov) %>%
   summarise(Number_Cells_Per_FOV = mean(nCell),
             Mean_Transcripts_Per_Cell_Per_FOV=mean(nCount_RNA),
             Mean_Unique_Transcripts_Per_Cell_Per_FOV=mean(nFeature_RNA),
-            Total_Transcripts_Per_FOV=sum(nCount_RNA)
+            Total_Transcripts_Per_FOV=sum(nCount_RNA),
+            Mean_Negative_Probe_Per_Plex_Per_Cell_Per_FOV=sum(nCount_negprobes)/(unique(nCell)*nNeg),
+            Mean_SystemControl_Per_Plex_Per_Cell_Per_FOV=sum(nCount_falsecode)/(unique(nCell)*nFC)
   )
 print("Calculated per FOV metrics")
 
-allqc <- base::merge(qc_stats, neg_probe_avg, by=c('Run_Tissue_name', 'fov'), all=T)
-print("Merged qc and negprobe data")
-allqc_final <- base::merge(allqc, fc_avg, by=c('Run_Tissue_name', 'fov'), all=T)
-print("Merged allqc and SystemControl data")
-
-
-
 # Save data tables to csv format
-write.csv(allqc_final, "/output/Per_FOV_data_quality_metrics.csv", quote=F)
+write.csv(qc_stats, "/output/Per_FOV_data_quality_metrics.csv", quote=F)
 print("Finished writing output file")
-
 
 
 ########### Plotting ###############
 options(scipen=999)
 
 # Mean transcripts per FOV
-p1 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_Transcripts_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
+p1 <- ggplot(qc_stats, aes(x=Run_Tissue_name, y=Mean_Transcripts_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
   geom_violin() + geom_jitter(width=0.25, height=0, size = 0.5) +
   geom_boxplot(width=0.2, outlier.shape = NA) +
   scale_fill_manual(values=alpha(pal,0.3)) +
@@ -137,7 +78,7 @@ p1 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_Transcripts_Per_Cell_Per
 ggsave("/output/Mean_Transcripts_Per_FOV.png", plot = p1, device = "png")
 
 # Total transcripts per FOV
-p2 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Total_Transcripts_Per_FOV, fill=as.factor(Run_Tissue_name))) +
+p2 <- ggplot(qc_stats, aes(x=Run_Tissue_name, y=Total_Transcripts_Per_FOV, fill=as.factor(Run_Tissue_name))) +
   geom_violin() + geom_jitter(width=0.25, height=0, size = 0.5) + 
   geom_boxplot(width=0.2, outlier.shape = NA) +
   scale_fill_manual(values=alpha(pal,0.3)) +
@@ -150,7 +91,7 @@ ggsave("/output/Total_Transcripts_Per_FOV.png", plot = p2, device = "png")
 
 
 # Number of cells per FOV
-p3 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Number_Cells_Per_FOV, fill=as.factor(Run_Tissue_name))) +
+p3 <- ggplot(qc_stats, aes(x=Run_Tissue_name, y=Number_Cells_Per_FOV, fill=as.factor(Run_Tissue_name))) +
   geom_violin() + geom_jitter(width=0.25, height=0, size = 0.5) +   
   geom_boxplot(width=0.2, outlier.shape = NA) +
   scale_fill_manual(values=alpha(pal,0.3)) +
@@ -163,7 +104,7 @@ ggsave("/output/Number_Cells_per_FOV.png", plot = p3, device = "png")
 
 
 # Mean negative probes per plex per cell per FOV 
-p4 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_Negative_Probe_Per_Plex_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
+p4 <- ggplot(qc_stats, aes(x=Run_Tissue_name, y=Mean_Negative_Probe_Per_Plex_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
   geom_violin() + geom_jitter(width=0.25, height=0, size = 0.5) +  
   geom_boxplot(width=0.2, outlier.shape = NA) +
   scale_fill_manual(values=alpha(pal,0.3)) +
@@ -175,7 +116,7 @@ ggsave("/output/Mean_NegProbeCount_Per_Plex_per_Cell_per_FOV.png", plot = p4, de
 
 
 # Mean SystemControl per plex per cell per FOV
-p5 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_SystemControl_Per_Plex_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
+p5 <- ggplot(qc_stats, aes(x=Run_Tissue_name, y=Mean_SystemControl_Per_Plex_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
   geom_violin() + geom_jitter(width=0.25, height=0, size = 0.5) +  
   geom_boxplot(width=0.2, outlier.shape = NA) +
   scale_fill_manual(values=alpha(pal,0.3)) +
@@ -186,7 +127,7 @@ p5 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_SystemControl_Per_Plex_P
 ggsave("/output/Mean_SystemControlCount_Per_Plex_per_Cell_per_FOV.png", plot = p5, device = "png")
 
 # Mean unique transcripts per cell per FOV
-p6 <- ggplot(allqc_final, aes(x=Run_Tissue_name, y=Mean_Unique_Transcripts_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
+p6 <- ggplot(qc_stats, aes(x=Run_Tissue_name, y=Mean_Unique_Transcripts_Per_Cell_Per_FOV, fill=as.factor(Run_Tissue_name))) +
   geom_violin() + geom_jitter(width=0.25, height=0, size = 0.5) +
   geom_boxplot(width=0.2, outlier.shape = NA) +
   scale_fill_manual(values=alpha(pal,0.3)) +
