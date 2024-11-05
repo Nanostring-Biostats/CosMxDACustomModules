@@ -10,6 +10,7 @@ This repository contains R script that can be used in custom modules in the AtoM
 | RNA QC Plots     | Summary plots of CosMx SMI RNA QC | [R script](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/RNAQCPlots/QC_Module_Flowcell_Plots.R), [Documentation](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/RNAQCPlots/CosMxDA_RNAQCPlotSetup.docx) | 
 | Get Sample Metadata    | Get the Sample Metadata for a Study | [R script](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/SampleMetadata/GetSampleMetadata.R), [Documentation](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/SampleMetadata/CosMxDAGetSampleMetadataSetup.docx) |
 | Update Sample Metadata    | Update the Sample Metadata for a Study | [R script](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/SampleMetadata/UpdateSampleMetadata.R), [Documentation](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/SampleMetadata/CosMxDAUpdateSampleMetadataSetup.docx) | 
+| Combine Sample Metadata    | Generate Query Columns in Sample Metadata | [Rscript](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/SampleMetadata/CombineSampleMetadata.R), [Documentation](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/SampleMetadata/CosMxDACombineSampleMetadataSetup.docx) |
   
 
 ## Instructions: 
