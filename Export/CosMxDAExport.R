@@ -1,16 +1,16 @@
 # CosMxDA Export Custom Module
-message("Custom Script Version: 1.2.3")
+message("Custom Script Version: 1.3.0")
 
-# Copyright 2023-2024 Bruker Spatial Biology, Inc.
-# This software and any associated files are distributed pursuant to the NanoString AtoMx Spatial 
-# Information Platform Software as a Service Agreement, available on the NanoString Technologies, Inc 
-# website at www.nanostring.com, as updated.  All rights reserved.  No permission is granted to modify, 
+# Copyright 2023-2025 Bruker Spatial Biology, Inc.
+# This software and any associated files are distributed pursuant to the Bruker Spatial Biology AtoMx Spatial
+# Informatics Platform Software as a Service Agreement, available on the Bruker Spatial Biology, Inc
+# website at www.nanostring.com, as updated.  All rights reserved.  No permission is granted to modify,
 # publish, distribute, sublicense or sell copies of this software.
 
-# Export all files associated with current study: Seurat, TileDB array, and/or raw files. 
-# For booleans: rawFiles, tiledbArray, & SeuratObject determine what type of data is exported. 
-# exportFOVImages, spotFiles, FullSeuratObject, & transcripts determine what is included in the data type export. 
-# To export spotFiles, rawFiles & spotFiles MUST be checked.
+# Export all files associated with current study: Seurat, TileDB array, and/or decoded files. 
+# For booleans: decodedFiles, tiledbArray, & SeuratObject determine what type of data is exported. 
+# exportFOVImages, FullSeuratObject, & transcripts determine what is included in the data type export. 
+# To export FOV Images, decodedFiles & exportFOVImages MUST be checked.
 
 # User defined variables
 # studyName     - Output Folder Name
@@ -21,12 +21,11 @@ message("Custom Script Version: 1.2.3")
 # session_token - Destination AWS session token, if needed
 
 # Advanced Boolean Options
-# rawFiles         - Export Raw Files
+# decodedFiles     - Export decoded Files
 # SeuratObject     - Export a Seurat Object
 # FullSeuratObject - Seurat object contains all previous module output
 # transcripts      - Export Seurat contains transcript coordinates (large data)
 # tiledbArray      - Export TileDB array
-# spotFiles        - Export spot files to redo Target Decoding (large data)
 # exportFOVImages  - Export all FOV Images (large data)
 
 
@@ -90,12 +89,11 @@ variableMsg <- variableTest(varName = "access_key", varType = "character", msg =
 variableMsg <- variableTest(varName = "secret_key", varType = "character", msg = variableMsg)
 variableMsg <- variableTest(varName = "s3Region", varType = "character", msg = variableMsg)
 variableMsg <- variableTest(varName = "session_token", varType = "character", required = FALSE, msg = variableMsg)
-variableMsg <- variableTest(varName = "rawFiles", varType = "logical", msg = variableMsg)
+variableMsg <- variableTest(varName = "decodedFiles", varType = "logical", msg = variableMsg)
 variableMsg <- variableTest(varName = "SeuratObject", varType = "logical", msg = variableMsg)
 variableMsg <- variableTest(varName = "FullSeuratObject", varType = "logical", msg = variableMsg)
 variableMsg <- variableTest(varName = "transcripts", varType = "logical", msg = variableMsg)
 variableMsg <- variableTest(varName = "tiledbArray", varType = "logical", msg = variableMsg)
-variableMsg <- variableTest(varName = "spotFiles", varType = "logical", msg = variableMsg)
 variableMsg <- variableTest(varName = "exportFOVImages", varType = "logical", msg = variableMsg)
 
 # stop on variable errors if applicable
@@ -168,7 +166,7 @@ toFullSeuratObject <- function(tiledbsc_dataset, transcripts = TRUE){
   if(any(grepl("RNA_normalized", names(sobject@assays)))){
     assayNames <- names(sobject@assays)[grepl("RNA_normalized", names(sobject@assays))]
     
-    # removing raw data from normalized assays to avoid duplications
+    # removing count data from normalized assays to avoid duplications
     for(i in assayNames){
       sobject[[i]]@counts <- matrix(data = 0, nrow = 0, ncol = 0)
     }
@@ -275,7 +273,10 @@ toFullSeuratObject <- function(tiledbsc_dataset, transcripts = TRUE){
   
   for(i in names(tiledbsc_dataset$somas$RNA$uns$members)){
     if(tiledbsc_dataset$somas$RNA$uns$members[[i]]$class() == "TileDBGroup"){
-      if(grepl("cellproximity", i)){
+      objectURIs <- tiledbsc_dataset$somas$RNA$uns$members[[i]]$list_object_uris()
+      
+      if(grepl("cellproximity|localization", i) | 
+         endsWith(objectURIs, suffix = "fullStudy")[[1L]]){
         if(any(grepl(tiledbsc_dataset$somas$RNA$uns$members[[i]]$list_objects()$URI, 
                      pattern = "which"))){
           # v1.1
@@ -285,17 +286,16 @@ toFullSeuratObject <- function(tiledbsc_dataset, transcripts = TRUE){
           objectURIs <- unlist(lapply(tiledbsc_dataset$somas$RNA$uns$members[[i]]$members, 
                                       function(self) self$list_object_uris()))
         }
-      }else{
-        objectURIs <- tiledbsc_dataset$somas$RNA$uns$members[[i]]$list_object_uris()
       }
       
       for(j in 1:length(objectURIs)){
         name <- paste0(i, "_", names(objectURIs)[j])
         
-        sobject@misc[[name]] <- nanopipeline:::from_tdb(objectURIs[j])
+        sobject@misc[[name]] <- nanopipeline:::from_tdb(objectURIs[j], ctx = tiledbsc_dataset$ctx)
       }
     }else{
-      sobject@misc[[i]] <- nanopipeline:::from_tdb(tiledbsc_dataset$somas$RNA$uns$members[[i]]$uri)
+      sobject@misc[[i]] <- nanopipeline:::from_tdb(tiledbsc_dataset$somas$RNA$uns$members[[i]]$uri,
+                                                   ctx = tiledbsc_dataset$ctx)
     }
   }
   
@@ -309,8 +309,7 @@ flowcell <- NULL
 # Check the nested booleans
 if(FullSeuratObject == TRUE){SeuratObject <- TRUE}
 if(transcripts == TRUE){SeuratObject <- TRUE}
-if(spotFiles == TRUE){rawFiles <- TRUE}
-if(exportFOVImages == TRUE){rawFiles <- TRUE}
+if(exportFOVImages == TRUE){decodedFiles <- TRUE}
 
 # change AWS credentials to user environment
 if(exists("session_token")){
@@ -323,32 +322,24 @@ dir.create("~/.aws")
 
 fileConn<-file("~/.aws/credentials", )
 writeLines(c("[export]",paste("aws_access_key_id =", access_key), 
-             paste("aws_secret_access_key =", secret_key), session_token), fileConn)
+             paste("aws_secret_access_key =", secret_key), session_token,
+             paste("ignore_configured_endpoint_urls =", "true")), fileConn)
 close(fileConn)
 
 # read in annotation file 
 # get input folder location and slide names
-all_files <- system2(command = "aws",arg = c("s3","ls", paste0(studyDirectory, "logs/")), stdout = TRUE)
+all_files <- s3_ls(paste0(studyDirectory, "logs/"), arry = study, fileType = "folder")
 studyCreation <- all_files[grep("study_creation_", all_files)]
 studyCreation <- strsplit(studyCreation, " ")[[1L]]
 studyCreation <- studyCreation[length(studyCreation)]
 
-studyCreation <- paste0(paste0(studyDirectory, "logs/"), studyCreation)
-
-annots <- system2(command = "aws",arg = c("s3","ls", studyCreation), stdout = TRUE)
+annots <- s3_ls(studyCreation, arry = study, fileType = "folder")
 annots <- annots[grep(".csv", annots)]
 annots <- annots[grep("Resources", annots, invert = TRUE)]
-annots <- strsplit(annots, " ")[[1L]]
-annots <- annots[length(annots)]
-annots <- paste0(studyCreation, annots)
 
-bucket <- strsplit(annots,"/")[[1L]][3L]
-file_key <- strsplit(annots, paste0(bucket,"/"))[[1L]][2L]
-system2(command = "aws", arg = c("s3api", "get-object","--bucket",bucket,"--key", file_key,paste0("/tmp/tmp.csv")), stdout = TRUE)
+s3_get(S3Path = annots, arry = study, localPath = "/tmp/tmp.csv", fileType = "file")
 annots <- read.delim("/tmp/tmp.csv", header = TRUE, sep = ",")
 file.remove("/tmp/tmp.csv")
-rm(bucket)
-rm(file_key)
 
 # get slide names
 slideName <- annots$Run_Tissue_name
@@ -409,7 +400,7 @@ if(tiledbArray == TRUE | (SeuratObject == TRUE & !is.null(config_subset))){
   localTileDB <- paste0(studyName, "/", tiledbName, "_TileDB/")
   
   # Copy Tiledb Object
-  system2(command = "aws", args = c("s3", "cp", study$uri, localTileDB, "--recursive"), stdout = FALSE)
+  s3_save(S3Path = study$uri, arry = study, localPath = localTileDB, fileType = "folder")
   
   if(!is.null(config_subset)){
     study <- tiledbsc::SOMACollection$new(uri = localTileDB, verbose = FALSE)
@@ -418,7 +409,8 @@ if(tiledbArray == TRUE | (SeuratObject == TRUE & !is.null(config_subset))){
   
   if(SeuratObject == FALSE | is.null(config_subset)){
     # move folder to user S3 bucket
-    system2(command = "aws", args = c("s3", "mv", studyName, paste0(outPath, studyName, "/"), "--recursive", "--profile", "export"), stdout = FALSE)
+    system2(command = "aws", args = c("s3", "mv", studyName, paste0(outPath, studyName, "/"), 
+                                      "--recursive", "--profile", "export"), stdout = FALSE)
   }
 }else{
   localTileDB <- NULL
@@ -462,11 +454,12 @@ if(SeuratObject == TRUE){
   gc()
   
   # move folder to user S3 bucket
-  system2(command = "aws", args = c("s3", "mv", studyName, paste0(outPath, studyName, "/"), "--recursive", "--profile", "export"), stdout = FALSE)
+  system2(command = "aws", args = c("s3", "mv", studyName, paste0(outPath, studyName, "/"), 
+                                    "--recursive", "--profile", "export"), stdout = FALSE)
 }
 
-if(rawFiles == TRUE){
-  message("Exporting Raw Files")
+if(decodedFiles == TRUE){
+  message("Exporting decoded Files")
   # Path to highest data folder
   paths <- strsplit(annots$slidefolders, "/")
   for(i in 1:nrow(annots)){
@@ -486,18 +479,8 @@ if(rawFiles == TRUE){
   
   for(i in 1:length(paths)){
     print(paste(slideName[[i]], "-", i, "/", length(paths)))
-    
-    all_files <- system2(command = "aws", args = c("s3", "ls", paths[[i]], "--recursive"), stdout = TRUE)
-    
-    all_files <- unlist(lapply(all_files, function(x){
-      temp_file_vec <- strsplit(x, " ")[[1L]]
-      
-      return(paste0(annots$folder_path[i], temp_file_vec[length(temp_file_vec)]))
-    }))
-    
-    if(spotFiles == FALSE){
-      all_files <- all_files[grep("SpotFiles", all_files, invert = TRUE)]
-    }
+    all_files <- s3_ls(S3Path = paths[[i]], arry = study, recursive = TRUE, fileType = "folder")
+    all_files <- all_files[grep("SpotFiles", all_files, invert = TRUE)]
     
     if(exportFOVImages == FALSE){
       all_files <- all_files[grep("png$|tif$|tiff$|jpg$", tolower(all_files), invert = TRUE)]
@@ -521,8 +504,9 @@ if(rawFiles == TRUE){
       if(startsWith(prefix = basename(annots$slidefolders[i]), resultsFile) | startsWith(prefix = "Logs", resultsFile)){
         resultsFile <- paste0(studyName, "/", slideName[[i]], "/", resultsFile)
         
+        dir.create(dirname(resultsFile), recursive = TRUE, showWarnings = FALSE)
         # copy to working environment using AtoMx credentials
-        system2(command = "aws", args = c("s3", "cp", currentFile, resultsFile), stdout = FALSE)
+        s3_get(S3Path = currentFile, localPath = resultsFile, arry = study, fileType = "file")
         # move folder to user S3 bucket
         system2(command = "aws", args = c("s3", "mv", resultsFile, paste0(outPath, resultsFile), "--profile", "export"), stdout = FALSE)
       }
