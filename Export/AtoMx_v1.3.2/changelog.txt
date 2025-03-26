@@ -1,0 +1,24 @@
+v1.2.3 (1/22/2023)
+- Fixed Seurat metadata adding
+
+v1.2.2 (10/2/2023)
+- Fixed non-required variable tests
+
+v1.2.1 (9/12/2023)
+- Fixed Seurat reduction assay.name
+
+v1.2.0 (8/30/2023)
+- More robust folder name generation
+
+v1.1.5 (8/8/2023)
+- fixed the cell proximity results attaching to Seurat to work with both v1.1 and v1.2 outputs. 
+- Improved the robustness in adding the results to the Seurat object. 
+- Added copyright information
+- Updated how normalization is added to Seurat object 
+    - Each normalization has it’s own assay with count matrix in the data slot
+    - Raw data is only stored in the RNA@counts and RNA@data matrix, not in normalized assays
+- Reduction objects in Seurat are pointed to the correct assay
+- Attached latest.fovs to Seurat object only from RNA soma
+
+v1.1.0
+Initial Release

@@ -1,3 +1,6 @@
+v1.2.0
+- Update script to work with 1.4.0 infrastructure
+
 v1.1.0
 - Bug fix for FOVs with 1 cell
 - Seurat v4.4 & v5 compatibility

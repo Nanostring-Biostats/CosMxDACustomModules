@@ -12,6 +12,8 @@ This repository contains R script that can be used in custom modules in the AtoM
 | Update Sample Metadata    | Update the Sample Metadata for a Study | [R script](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/SampleMetadata/UpdateSampleMetadata.R), [Documentation](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/SampleMetadata/CosMxDAUpdateSampleMetadataSetup.docx) | 
 | Combine Sample Metadata    | Generate Query Columns in Sample Metadata | [Rscript](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/SampleMetadata/CombineSampleMetadata.R), [Documentation](https://github.com/Nanostring-Biostats/CosMxDACustomModules/blob/main/SampleMetadata/CosMxDACombineSampleMetadataSetup.docx) |
   
+  
+Export custom modules have an AtoMx v1.3.2 and v1.4.0 version. These modules are NOT interchangeable and must be run on their respective AtoMx versions. Each export module has an AtoMx_v1.3.2 folder that contains the older scripts. 
 
 ## Instructions: 
 Download R script from NanoString [website](https://nanostring.com/) or [GitHub](https://github.com/Nanostring-Biostats/CosMxDACustomModules) 
